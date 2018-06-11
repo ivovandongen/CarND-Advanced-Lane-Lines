@@ -34,16 +34,24 @@ def calibrate_camera(images, shape=(9,6), img_shape = None):
     return mtx, dist
 
 
+def undistort(img, matrix, distortion):
+    return cv2.undistort(img, matrix, distortion, None, matrix)
+
+
 def main():
     # Make a list of calibration images
+    print ("Calculating distortion matrix")
     images = glob.glob('camera_cal/calibration*.jpg')
     mtx, dist = calibrate_camera(images, img_shape=(1280, 720))
+
+    print("Showing undistorted images")
     for fname in images:
         img = cv2.imread(fname)
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         ret, corners = cv2.findChessboardCorners(gray, (9, 6), None)
-        img = cv2.drawChessboardCorners(img, (9, 6), corners, ret)
-        undist = cv2.undistort(img, mtx, dist, None, mtx)
+        if ret:
+            img = cv2.drawChessboardCorners(img, (9, 6), corners, ret)
+        undist = undistort(img, mtx, dist)
         cv2.imshow('img', undist)
         cv2.waitKey(500)
     cv2.destroyAllWindows()
