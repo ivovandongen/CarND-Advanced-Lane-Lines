@@ -8,6 +8,7 @@ class PerspectiveTransform:
 
     def __init__(self, src, dst):
         self.M = cv2.getPerspectiveTransform(src, dst)
+        self.Minv = cv2.getPerspectiveTransform(dst, src)
 
     def transform(self, image, img_size=None):
         return cv2.warpPerspective(image, self.M,
@@ -15,9 +16,9 @@ class PerspectiveTransform:
                                    flags=cv2.INTER_LINEAR)
 
     def inverse(self, image, img_size=None):
-        return cv2.warpPerspective(image, self.M,
+        return cv2.warpPerspective(image, self.Minv,
                                    img_size if img_size is not None else (image.shape[1], image.shape[0]),
-                                   flags=cv2.INTER_LINEAR|cv2.WARP_INVERSE_MAP)
+                                   flags=cv2.INTER_LINEAR)
 
 
 def main():
