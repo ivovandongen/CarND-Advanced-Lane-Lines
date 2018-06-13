@@ -14,6 +14,11 @@ class PerspectiveTransform:
                                    img_size if img_size is not None else (image.shape[1], image.shape[0]),
                                    flags=cv2.INTER_LINEAR)
 
+    def inverse(self, image, img_size=None):
+        return cv2.warpPerspective(image, self.M,
+                                   img_size if img_size is not None else (image.shape[1], image.shape[0]),
+                                   flags=cv2.INTER_LINEAR|cv2.WARP_INVERSE_MAP)
+
 
 def main():
 
@@ -40,7 +45,9 @@ def main():
 
         transformed = transform.transform(np.copy(polygonned), (width, height))
 
-        f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(32, 9))
+        inversed = transform.inverse(np.copy(transformed), (width, height))
+
+        f, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(32, 9))
         ax1.set_title('Original', fontsize=20)
         ax1.imshow(image)
 
@@ -49,6 +56,9 @@ def main():
 
         ax3.set_title('Transformed', fontsize=20)
         ax3.imshow(transformed)
+
+        ax4.set_title('Transformed inversed', fontsize=20)
+        ax4.imshow(inversed)
 
         plt.savefig('output_images/transform_' + fname.split('/')[-1])
 
