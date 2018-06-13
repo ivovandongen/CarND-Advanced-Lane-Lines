@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
+from glob import glob
 
 
 class PerspectiveTransform:
@@ -15,26 +17,40 @@ class PerspectiveTransform:
 
 def main():
 
-    print("Preparing image")
-    image = cv2.imread('test_images/straight_lines1.jpg')
-    img_shape = image.shape
-    height = img_shape[0]
-    width = img_shape[1]
+    # Fixed image dimensions
+    height = 720
+    width = 1280
 
-    poly_height = int(height / 2 * 1.2)
-    polygon = [[180, height], [width // 2 - 100, poly_height], [width // 2 + 100, poly_height], [width - 180, height]]
-
-    image = cv2.fillPoly(image, np.array([polygon]), color=255)
+    poly_height = int(height * .35)
+    bottom_offset = 80
+    top_offset = 120
+    polygon = [[bottom_offset, height], [width // 2 - top_offset, height - poly_height], [width // 2 + top_offset, height - poly_height], [width - bottom_offset, height]]
 
     print("Calculating perspective transform matrix")
-    dst = [[180, height], [180, 0], [width - 180, 0], [width - 180, height]]
+    dst = [[bottom_offset, height], [bottom_offset, 0], [width - bottom_offset, 0], [width - bottom_offset, height]]
     transform = PerspectiveTransform(np.float32(polygon), np.float32(dst))
 
-    print("Showing warped image")
-    cv2.imshow('img', transform.transform(image))
+    images = glob('test_images/test*')
 
-    cv2.waitKey(5000)
-    cv2.destroyAllWindows()
+    for fname in images:
+        print("Processing", fname)
+        image = cv2.cvtColor(cv2.imread(fname), cv2.COLOR_BGR2RGB)
+
+        polygonned = cv2.polylines(np.copy(image), np.array([polygon]), False, color=255, thickness=2)
+
+        transformed = transform.transform(np.copy(polygonned), (width, height))
+
+        f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(32, 9))
+        ax1.set_title('Original', fontsize=20)
+        ax1.imshow(image)
+
+        ax2.set_title('Area of interest', fontsize=20)
+        ax2.imshow(polygonned)
+
+        ax3.set_title('Transformed', fontsize=20)
+        ax3.imshow(transformed)
+
+        plt.savefig('output_images/transform_' + fname.split('/')[-1])
 
 
 if __name__ == '__main__':
