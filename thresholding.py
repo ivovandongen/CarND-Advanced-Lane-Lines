@@ -3,12 +3,124 @@ import cv2
 import glob
 import matplotlib.pyplot as plt
 
+# def alternative(img, sobel_kernel=9, sx_thresh=(20,100), sc_thresh=(170,255)):
+# 	# Convert to HSV color space and separate the S channel
+#     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HLS).astype(np.float)
+#     h_channel = hsv[:,:,0]
+#     l_channel = hsv[:,:,1]
+#     s_channel = hsv[:,:,2]
+#
+#     # Use the s_channel
+#     channel = s_channel
+#
+#     # Sobel x and y
+#     sobel_x = cv2.Sobel(channel, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+#     sobel_y = cv2.Sobel(channel, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+#
+#     # Absolute derivative in x and y
+#     sobel_x_abs = np.absolute(sobel_x)
+#     sobel_y_abs = np.absolute(sobel_y)
+#
+#     # Scale to 8-bit (0 - 255) then convert to type = np.uint8
+#     scaled_sobel_x = np.uint8(255*sobel_x_abs/np.max(sobel_x_abs))
+#
+#     # Threshold x gradient
+#     sx_binary = np.zeros_like(scaled_sobel_x)
+#     sx_binary[(scaled_sobel_x >= sx_thresh[0]) & (scaled_sobel_x <= sx_thresh[1])] = 1
+#
+#     # Threshold color channel
+#     s_binary = np.zeros_like(s_channel)
+#     s_binary[(channel >= sc_thresh[0]) & (channel <= sc_thresh[1])] = 1
+#
+#     # Create a binary flat image.
+#     flat_binary = np.zeros_like(sx_binary)
+#     flat_binary[(sx_binary == 1) | (s_binary == 1)] = 1
+#
+#     return flat_binary
+
 
 def blur(image, kernel_size=15):
     return cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
 
 
-def threshold(img, s_thresh=(170, 255), sx_thresh=(20, 100), stack=False):
+def abs_sobel_thresh(img, orient='x', thresh_min=0, thresh_max=255, sobel_kernel=9):
+    # 2) Take the derivative in x or y given orient = 'x' or 'y'
+    sobel = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=sobel_kernel) if orient == 'x' \
+        else cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+
+    # 3) Take the absolute value of the derivative or gradient
+    abs_sobel = np.absolute(sobel)
+
+    # 4) Scale to 8-bit (0 - 255) then convert to type = np.uint8
+    scaled_sobel = np.uint8(255 * abs_sobel / np.max(abs_sobel))
+
+    # 5) Create a mask of 1's where the scaled gradient magnitude
+    # is > thresh_min and < thresh_max
+    sxbinary = np.zeros_like(scaled_sobel)
+    sxbinary[(scaled_sobel >= thresh_min) & (scaled_sobel <= thresh_max)] = 1
+
+    # 6) Return this mask as your binary_output image
+    binary_output = sxbinary
+    return binary_output
+
+
+def dir_threshold(img, sobel_kernel=15, thresh=(0.7, 1.3)):
+
+    # 2) Take the gradient in x and y separately
+    sobelx = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+    sobely = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+
+    # 3) Take the absolute value of the x and y gradients
+    abs_sobelx = np.absolute(sobelx)
+    abs_sobely = np.absolute(sobely)
+
+    # 4) Use np.arctan2(abs_sobely, abs_sobelx) to calculate the direction of the gradient
+    gradient_direction = np.arctan2(abs_sobely, abs_sobelx)
+
+    # 5) Create a binary mask where direction thresholds are met
+    binary_output = np.zeros_like(gradient_direction)
+    binary_output[(gradient_direction >= thresh[0]) & (gradient_direction <= thresh[1])] = 1
+
+    # 6) Return this mask as your binary_output image
+    return binary_output
+
+def mag_thresh(img, sobel_kernel=9, mag_thresh=(30, 100)):
+
+    # 2) Take the gradient in x and y separately
+    sobelx = cv2.Sobel(img, cv2.CV_64F, 1, 0, ksize=sobel_kernel)
+    sobely = cv2.Sobel(img, cv2.CV_64F, 0, 1, ksize=sobel_kernel)
+
+    # 3) Calculate the magnitude
+    abs_sobelxy = np.sqrt(sobelx ** 2 + sobely ** 2)
+
+    # 4) Scale to 8-bit (0 - 255) and convert to type = np.uint8
+    scaled_sobel = np.uint8(255 * abs_sobelxy / np.max(abs_sobelxy))
+
+    # 5) Create a binary mask where mag thresholds are met
+    binary_output = np.zeros_like(scaled_sobel)
+    binary_output[(scaled_sobel >= mag_thresh[0]) & (scaled_sobel <= mag_thresh[1])] = 1
+
+    # 6) Return this mask as your binary_output image
+    return binary_output
+
+
+def sobel_combined(img):
+    gradx = abs_sobel_thresh(img, orient='x', thresh_min=20, thresh_max=100)
+    grady = abs_sobel_thresh(img, orient='y', thresh_min=20, thresh_max=100)
+    dir_binary = dir_threshold(img)
+    mag_binary = mag_thresh(img)
+    combined = np.zeros_like(dir_binary)
+    combined[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1))] = 1
+    return combined
+
+
+def color_thresh(img, thresh=(0,255)):
+    s_binary = np.zeros_like(img)
+    s_binary[(img >= thresh[0]) & (img <= thresh[1])] = 1
+    return s_binary
+
+
+def threshold(img, s_thresh=(170, 255), sx_thresh=(20, 100), sobel_kernel=9, stack=False):
     img = np.copy(img)
 
     # TODO:
@@ -29,14 +141,14 @@ def threshold(img, s_thresh=(170, 255), sx_thresh=(20, 100), stack=False):
     #   from multiple frames?
 
     # Convert to HLS color space and separate the V channel
-    hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS)
+    hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
     h_channel = hls[:, :, 0]
     l_channel = hls[:, :, 1]
     s_channel = hls[:, :, 2]
 
     # Sobel x
-    # gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    sobelx = cv2.Sobel(blur(l_channel), cv2.CV_64F, 1, 0)  # Take the derivative in x
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    sobelx = cv2.Sobel(s_channel, cv2.CV_64F, 1, 0, ksize=sobel_kernel)  # Take the derivative in x
     abs_sobelx = np.absolute(sobelx)  # Absolute x derivative to accentuate lines away from horizontal
     scaled_sobel = np.uint8(255 * abs_sobelx / np.max(abs_sobelx))
 
@@ -75,16 +187,80 @@ def main():
         img = cv2.imread(fname)
 
         combined_binary, color_binary = threshold(img, stack=True)
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        hls = cv2.cvtColor(img, cv2.COLOR_BGR2HLS)
+        h_channel = hls[:, :, 0]
+        l_channel = hls[:, :, 1]
+        s_channel = hls[:, :, 2]
 
-        f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(32, 9))
-        ax1.set_title('Stacked thresholds', fontsize=20)
+        f, (r1, r2, r3, r4, r5) = plt.subplots(5, 4, figsize=(32, 22))
+
+        (ax1, ax2, ax3, ax4) = r1
+        ax1.set_title('Original', fontsize=20)
         ax1.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
 
-        ax2.set_title('Combined S channel and gradient thresholds', fontsize=20)
-        ax2.imshow(combined_binary, cmap='gray')
+        ax2.set_title('H', fontsize=20)
+        ax2.imshow(h_channel, cmap='gray')
 
-        ax3.imshow(color_binary)
-        ax3.set_title('Color stacked', fontsize=20)
+        ax3.imshow(l_channel)
+        ax3.set_title('L', fontsize=20)
+
+        ax4.imshow(s_channel, cmap='gray')
+        ax4.set_title('S', fontsize=20)
+
+        (ax1, ax2, ax3, ax4) = r2
+        ax1.imshow(dir_threshold(gray), cmap='gray')
+        ax1.set_title('Sobel direction (gray)', fontsize=20)
+
+        ax2.imshow(dir_threshold(h_channel), cmap='gray')
+        ax2.set_title('Sobel direction (H)', fontsize=20)
+
+        ax3.imshow(dir_threshold(l_channel), cmap='gray')
+        ax3.set_title('Sobel direction (L)', fontsize=20)
+
+        ax4.imshow(dir_threshold(s_channel), cmap='gray')
+        ax4.set_title('Sobel direction (S)', fontsize=20)
+
+        (ax1, ax2, ax3, ax4) = r3
+        ax1.imshow(mag_thresh(gray), cmap='gray')
+        ax1.set_title('Sobel magnitude (gray)', fontsize=20)
+
+        ax2.imshow(mag_thresh(h_channel), cmap='gray')
+        ax2.set_title('Sobel magnitude (H)', fontsize=20)
+
+        ax3.imshow(mag_thresh(l_channel), cmap='gray')
+        ax3.set_title('Sobel magnitude (L)', fontsize=20)
+
+        ax4.imshow(mag_thresh(s_channel), cmap='gray')
+        ax4.set_title('Sobel magnitude (S)', fontsize=20)
+
+        (ax1, ax2, ax3, ax4) = r4
+        ax1.imshow(sobel_combined(gray), cmap='gray')
+        ax1.set_title('Sobel combined (gray)', fontsize=20)
+
+        ax2.imshow(sobel_combined(h_channel), cmap='gray')
+        ax2.set_title('Sobel combined (H)', fontsize=20)
+
+        ax3.imshow(sobel_combined(l_channel), cmap='gray')
+        ax3.set_title('Sobel combined (L)', fontsize=20)
+
+        ax4.imshow(sobel_combined(s_channel), cmap='gray')
+        ax4.set_title('Sobel combined (S)', fontsize=20)
+
+        (ax1, ax2, ax3, ax4) = r5
+        threshed, color = threshold(img, sobel_kernel=9, s_thresh=(90, 255))
+        ax1.imshow(threshed, cmap='gray')
+        ax1.set_title('Combined Sobel/Color', fontsize=20)
+
+        ax2.imshow(color_thresh(h_channel, thresh=(0, 100)), cmap='gray')
+        ax2.set_title('Color thresh (H)', fontsize=20)
+
+        ax3.imshow(color_thresh(l_channel, thresh=(170, 255)), cmap='gray')
+        ax3.set_title('Color thresh (L)', fontsize=20)
+
+        ax4.imshow(color_thresh(s_channel, thresh=(90, 255)), cmap='gray')
+        ax4.set_title('Color thresh (S)', fontsize=20)
+
 
         plt.savefig('output_images/threshold_' + fname.split('/')[-1])
 
