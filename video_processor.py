@@ -17,7 +17,9 @@ class VideoProcessor:
         Creates the processor
         :param input_file: the input video file name
         :param output_file: the output video file name
-        :param image_size: the iamge size of the video
+        :param image_size: the image size of the video
+
+        Use VideoProcessor:process to start processing
         """
         self.input_file = input_file
         self.output_file = output_file
@@ -48,17 +50,26 @@ class VideoProcessor:
         return PerspectiveTransform(np.float32(polygon), np.float32(dst))
 
     def process(self, sub_clip=None):
+        """
+        Process the video clip
+        :param sub_clip: optionally specify a sub clip (start, end)
+        :return: None
+        """
         clip = VideoFileClip(self.input_file)
         if sub_clip:
             clip = clip.subclip(sub_clip[0], sub_clip[1])
-        out_clip = clip.fl_image(lambda image: self.process_image(image))
+        out_clip = clip.fl_image(lambda image: self._process_image(image))
         out_clip.write_videofile(self.output_file, audio=False)
 
-    def create_birds_eye_view(self, warped_image, scale_factor=3):
+    def scale_image(self, image, scale_factor=3):
+        return cv2.resize(image,
+                          dsize=(self.image_size[1] // scale_factor, self.image_size[0] // scale_factor),
+                          interpolation=cv2.INTER_CUBIC)
+
+    def create_birds_eye_view(self, warped_image):
         """
         Create a image of the birds-eye view projection
         :param warped_image: warped binary image
-        :param scale_factor: down-size scale factor
         :return: RGB scaled image
         """
 
@@ -67,31 +78,35 @@ class VideoProcessor:
         overlay_large = self.lane.overlay(warped_image, draw_lines=True, fill_lane=False)
 
         # Resize
-        return cv2.resize(overlay_large,
-                          dsize=(self.image_size[1] // scale_factor, self.image_size[0] // scale_factor),
-                          interpolation=cv2.INTER_CUBIC)
+        return self.scale_image(overlay_large)
 
-    def process_image(self, org_image):
+    @staticmethod
+    def add_image_overlay(image, overlay, offset=(0, 0)):
+        y_offset = offset[0]
+        x_offset = offset[1]
+        image[y_offset:y_offset + overlay.shape[0], x_offset:x_offset + overlay.shape[1]] = overlay
+        return image
+
+    def _process_image(self, org_image):
         # Create the warped binary image (birds-eye view with lane lines highlighted)
-        image = self.calibration.undistort(np.copy(org_image))
-        combined, _ = threshold(image, stack=False)
-        warped = self.transform.transform(combined)
+        undistorted_image = self.calibration.undistort(np.copy(org_image))
+        threshold_image, _ = threshold(undistorted_image, stack=False)
+        warped_image = self.transform.transform(threshold_image)
 
         # Update our lane tracker
-        self.lane.update(warped_image=warped)
+        self.lane.update(warped_image=warped_image)
 
         # Add the lane overlay to our original image
         org_image = self.lane.overlay(org_image, transform_fn=lambda x: self.transform.inverse(x))
 
         # Create picture-in-picture overlays
-        birds_eye_overlay = self.create_birds_eye_view(warped_image=warped)
+        birds_eye_overlay = self.create_birds_eye_view(warped_image)
+        binary_overlay = self.scale_image(np.dstack((threshold_image, threshold_image, threshold_image)) * 255)
 
-        # Overlay result picture-in-picture style on original
-        y_offset, x_offset = 0, 0
-        org_image[y_offset:y_offset + birds_eye_overlay.shape[0],
-        x_offset:x_offset + birds_eye_overlay.shape[1]] = birds_eye_overlay
-        # x_offset = org_image.shape[1] - pipe2_result.shape[1]
-        # org_image[y_offset:y_offset + pipe2_result.shape[0], x_offset:x_offset + pipe2_result.shape[1]] = pipe2_result
+        # Overlay picture-in-picture style on original
+        self.add_image_overlay(org_image, binary_overlay)
+        self.add_image_overlay(org_image, birds_eye_overlay,
+                               offset=(0, org_image.shape[1] - birds_eye_overlay.shape[1]))
 
         return org_image
 
