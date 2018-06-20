@@ -1,43 +1,67 @@
 from lane_line import LaneLine
-from line_locator import find_lines_with_sliding_windows
+from line_locator import find_lines_with_sliding_windows, find_lines_from_previous
 import cv2
 import numpy as np
+from collections import deque
+from glob import glob
 
-from camera_calibration import default_camera_calibration
-from transform import PerspectiveTransform
+from camera_calibration import CameraCalibration
+from transform import PerspectiveTransform, Transform
 from thresholding import threshold
 
 
-def _draw_lane_overlay(img, left_fit, right_fit, transform_fn=None, draw_lines=False, fill_lane=True):
-    height = img.shape[0]
-    ploty = np.linspace(0, height - 1, height)
-    overlay = np.zeros_like(img).astype(np.uint8)
+def _draw_lane_overlay(img, left_lane: LaneLine, right_lane: LaneLine, transform, draw_lines=False,
+                       fill_lane=True):
+    height = int(img.shape[0] * transform.y_scale())
+    y_points = np.linspace(0, height - 1, height)
+    overlay = np.zeros((height, img.shape[1], img.shape[2])).astype(np.uint8)#np.zeros_like(img).astype(np.uint8)
 
     # Calculate points.
-    left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
-    right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
+    left_fitx = left_lane.calculate_points_along_line(y_points)
+    right_fitx = right_lane.calculate_points_along_line(y_points)
 
     # Create lists of points for both lines
-    pts_left = np.transpose(np.vstack([left_fitx, ploty]))
-    pts_right = np.transpose(np.vstack([right_fitx, ploty]))
+    pts_left = np.transpose(np.vstack([left_fitx, y_points]))
+    pts_right = np.transpose(np.vstack([right_fitx, y_points]))
 
     if fill_lane:
-        # Make a polygon out of the points if both lines
+        # Make a polygon out of the points of both lines
         pts = np.hstack((np.array([pts_left]), np.array([np.flipud(pts_right)])))
 
         # Draw the lane onto the warped blank image
         cv2.fillPoly(overlay, np.int_([pts]), (0, 255, 0))
-        overlay = overlay if transform_fn is None else transform_fn(overlay)
+        overlay = transform.transform(overlay)
         img = cv2.addWeighted(img, 1, overlay, 0.3, 0)
 
     if draw_lines:
         # Draw lines on top
         overlay = np.zeros_like(img).astype(np.uint8)
         cv2.polylines(overlay, np.int32([pts_left, pts_right]), False, (255, 0, 0), thickness=15)
-        overlay = overlay if transform_fn is None else transform_fn(overlay)
+        overlay = transform.transform(overlay)
         img[(overlay > 0)] = 255
 
     return img
+
+
+class DetectionFrame:
+
+    def __init__(self, left: LaneLine, right: LaneLine):
+        self.left_lane = left
+        self.right_lane = right
+        self.curvature_m = None
+
+    def is_valid(self):
+        # TODO
+        # - Check distance between
+        # - Check if parallel
+        # - Check if similar curvature
+        return self.left_lane.is_valid() and self.right_lane.is_valid()
+
+    def calculate_curvature_m(self):
+        if self.curvature_m is None:
+            self.curvature_m = (self.left_lane.calculate_curvature_m() + self.right_lane.calculate_curvature_m()) / 2
+
+        return self.curvature_m
 
 
 class Lane:
@@ -46,29 +70,87 @@ class Lane:
     """
 
     def __init__(self):
-        self.left_lane = LaneLine()
-        self.right_lane = LaneLine()
-        self.invalid_frames = 0
-        self.result = None
+        self.history = deque(maxlen=60)
+        self.last_valid_frame = None
+
+    def curve_radius(self):
+        curves = np.array([frame.calculate_curvature_m() for frame in self.history if frame is not None])
+        curves = curves[abs(curves - np.mean(curves)) < 1 * np.std(curves)] if len(curves) > 1 else curves
+        return np.mean(curves) if len(curves) > 0 else -1
 
     def update(self, warped_image):
-        self.result = find_lines_with_sliding_windows(warped_image)
-        return True
+        # First try with a previous frame
+        if self.last_valid_frame is not None:
+            left_lane, right_lane = find_lines_from_previous(warped_image, self.last_valid_frame.left_lane,
+                                                             self.last_valid_frame.right_lane)
+            frame = DetectionFrame(left_lane, right_lane)
+            if frame.is_valid():
+                self.history.append(frame)
+                self.last_valid_frame = frame
+                return
 
-    def overlay(self, image, transform_fn=None, draw_lines=False, fill_lane=True):
+        print("Initial detection")
+        left_lane, right_lane = find_lines_with_sliding_windows(warped_image)
+        frame = DetectionFrame(left_lane, right_lane)
+        if frame.is_valid():
+            self.history.append(frame)
+            self.last_valid_frame = frame
+
+        # TODO: fall back on history if possible (or do when drawing)
+
+        # if self.last_valid_frame is None:  # TODO self.last_valid_frame is None #len(self.history) == 0:
+        #     print("Initial detection")
+        #     left_lane, right_lane = find_lines_with_sliding_windows(warped_image)
+        #     frame = DetectionFrame(left_lane, right_lane)
+        #     self.history.append(frame)
+        #     if frame.is_valid():
+        #         self.last_valid_frame = frame
+        #     #TODO: Else....
+        #     # else:
+        #     #     self.last_valid_frame
+        # else:
+        #     left_lane, right_lane = find_lines_from_previous(warped_image, self.last_valid_frame.left_lane, self.last_valid_frame.right_lane)
+        #     frame = DetectionFrame(left_lane, right_lane)
+        #     if frame.is_valid():
+        #         self.last_valid_frame = frame
+
+        # TODO:
+        # - check history of last x frames
+
+    def overlay(self, image, transform:Transform=Transform(), draw_lines=False, fill_lane=True):
         # Ensure the polyfit could be calculated
-        (left_fit, right_fit, left_lane_inds, right_lane_inds, left_lane_windows, right_lane_windows) = self.result
-        if len(left_fit) >= 3 and len(right_fit) >= 3:
-            return _draw_lane_overlay(image, left_fit, right_fit,
-                                      transform_fn=transform_fn,
+        if self.last_valid_frame is not None:
+            # print(self.last_valid_frame.left_lane.calculate_curvature_m(),
+            #       self.last_valid_frame.right_lane.calculate_curvature_m())
+            frame = self.last_valid_frame
+            return _draw_lane_overlay(image, frame.left_lane, frame.right_lane,
+                                      transform=transform,
                                       draw_lines=draw_lines,
                                       fill_lane=fill_lane)
         else:
             print("skipping")
             return image
 
-    def isValid(self):
-        return False
+    def overlay_curvature(self, image, bottomLeftCornerOfText=(10, 500), fontScale=1, fontColor=(255, 255, 255),
+                          lineType=2, font=cv2.FONT_HERSHEY_SIMPLEX, debug=False):
+        if self.last_valid_frame is not None:
+            if debug:
+                text = "Left: {}, right: {}, Avg: ".format(self.last_valid_frame.left_lane.calculate_curvature_m(),
+                                                           self.last_valid_frame.right_lane.calculate_curvature_m(),
+                                                           self.last_valid_frame.calculate_curvature_m())
+            else:
+                radius = self.curve_radius()
+                text = "Curve radius: {:6.2f}m".format(radius) if radius < 5000 else "Curve radius is straight"
+
+            return cv2.putText(image,
+                               text,
+                               bottomLeftCornerOfText,
+                               font,
+                               fontScale,
+                               fontColor,
+                               lineType)
+        else:
+            return image
 
 
 def main():
@@ -78,32 +160,36 @@ def main():
 
     # Prepare camera calibration
     print("Calibrating camera")
-    calibration = default_camera_calibration()
+    calibration = CameraCalibration.default()
+    transform = PerspectiveTransform.default(height, width)
 
-    # Prepare perspective transform
-    poly_height = int(height * .35)
-    bottom_offset = 80
-    top_offset = 120
-    polygon = [[bottom_offset, height], [width // 2 - top_offset, height - poly_height],
-               [width // 2 + top_offset, height - poly_height], [width - bottom_offset, height]]
+    images = glob('test_images/straight*') + glob('test_images/test*')
 
-    print("Calculating perspective transform matrix")
-    dst = [[bottom_offset, height], [bottom_offset, 0], [width - bottom_offset, 0], [width - bottom_offset, height]]
-    transform = PerspectiveTransform(np.float32(polygon), np.float32(dst))
+    for fname in images:
+        print("Processing", fname)
+        org_image = cv2.imread(fname)
+        if org_image.shape != (height, width, 3):
+            print("skipping image", fname, "invalid dimensions", org_image.shape)
+            continue
 
-    org_image = cv2.imread("test_images/test1.jpg")
+        # Run the pipeline on a copy of the image
+        undistorted = calibration.undistort(np.copy(org_image))
+        transformed = transform.transform(undistorted)
+        warped_binary, _ = threshold(transformed, stack=False)
+        # combined, _ = threshold(undistorted, stack=False)
+        # warped_binary = transform.transform(combined)
 
-    # Run the pipeline on a copy of the image
-    image = calibration.undistort(np.copy(org_image))
-    # image = transform.transform(image)
-    combined, _ = threshold(image, stack=False)
-    warped_binary = transform.transform(combined)
+        lane = Lane()
+        lane.update(warped_binary)
+        final = lane.overlay(org_image, draw_lines=False, fill_lane=True, transform=transform.invert())
+        final = lane.overlay_curvature(final)
+        final = cv2.polylines(final, [np.int32(transform.src)], color=[255, 0, 0], isClosed=False)
 
-    lane = Lane()
-    lane.update(warped_binary)
-    final = lane.overlay(org_image, draw_lines=True, fill_lane=False, transform_fn=lambda x: transform.inverse(x))
+        cv2.imwrite('output_images/lane_{}'.format(fname.split('/')[-1]), final)
 
-    cv2.imwrite('output_images/lane_test1.jpg', final)
+        final = lane.overlay(np.dstack((warped_binary, warped_binary, warped_binary)) * 255, draw_lines=True,
+                             fill_lane=False)
+        cv2.imwrite('output_images/lane_warped_{}'.format(fname.split('/')[-1]), final)
 
 
 if __name__ == '__main__':

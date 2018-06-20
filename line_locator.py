@@ -1,12 +1,16 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
+from lane_line import LaneLine
 
 
-def plot(binary_warped, left_fit, right_fit):
+def find_lines_from_previous(binary_warped, left_line: LaneLine, right_lane: LaneLine):
     nonzero = binary_warped.nonzero()
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
+
+    left_fit = left_line.poly
+    right_fit = right_lane.poly
 
     margin = 100
     left_lane_inds = ((nonzerox > (left_fit[0] * (nonzeroy ** 2) + left_fit[1] * nonzeroy +
@@ -24,25 +28,23 @@ def plot(binary_warped, left_fit, right_fit):
     lefty = nonzeroy[left_lane_inds]
     rightx = nonzerox[right_lane_inds]
     righty = nonzeroy[right_lane_inds]
+
     # Fit a second order polynomial to each
     left_fit = np.polyfit(lefty, leftx, 2)
     right_fit = np.polyfit(righty, rightx, 2)
-    # Generate x and y values for plotting
-    ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
-    left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
-    right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
 
-    return left_fit, right_fit, left_fitx, right_fitx
+    return LaneLine(left_fit, left_lane_inds, binary_warped.shape), LaneLine(right_fit, right_lane_inds, binary_warped.shape)
+
 
 def find_lines_with_sliding_windows(binary_warped, num_windows=9, window_margin=100, pixel_threshold=50):
-    '''
+    """
 
     :param binary_warped: the input image
     :param num_windows: the number of windows per line to use
     :param window_margin: the width of the windows +/- margin
     :param pixel_threshold: the minimum number of pixels found to recenter window
-    :return:
-    '''
+    :return: left_lane: LaneLine, right_lane: LaneLine
+    """
 
     # Assuming you have created a warped binary image called "binary_warped"
     # Take a histogram of the bottom half of the image
@@ -117,15 +119,16 @@ def find_lines_with_sliding_windows(binary_warped, num_windows=9, window_margin=
     left_fit = np.polyfit(lefty, leftx, 2) if len(lefty) > 0 and len(leftx) > 0 else [np.array([False])]
     right_fit = np.polyfit(righty, rightx, 2) if len(righty) > 0 and len(rightx) > 0 else [np.array([False])]
 
-    return left_fit, right_fit, left_lane_inds, right_lane_inds, left_lane_windows, right_lane_windows
+    return LaneLine(left_fit, left_lane_inds, binary_warped.shape, left_lane_windows), LaneLine(right_fit, right_lane_inds,
+                                                                                                binary_warped.shape,
+                                                                                                right_lane_windows)
 
 
-def plot_sliding_windows(binary_warped, left_fit, right_fit, left_lane_inds, right_lane_inds, left_lane_windows,
-                         right_lane_windows):
+def plot_sliding_windows(binary_warped, left_lane: LaneLine, right_lane: LaneLine):
     # Generate x and y values for plotting
     ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
-    left_fitx = left_fit[0] * ploty ** 2 + left_fit[1] * ploty + left_fit[2]
-    right_fitx = right_fit[0] * ploty ** 2 + right_fit[1] * ploty + right_fit[2]
+    left_fitx = left_lane.calculate_points_along_line(ploty)
+    right_fitx = right_lane.calculate_points_along_line(ploty)
 
     # Create an output image to draw on and  visualize the result
     # Identify the x and y positions of all nonzero pixels in the image
@@ -133,10 +136,10 @@ def plot_sliding_windows(binary_warped, left_fit, right_fit, left_lane_inds, rig
     nonzeroy = np.array(nonzero[0])
     nonzerox = np.array(nonzero[1])
     out_img = np.dstack((binary_warped, binary_warped, binary_warped)) * 255
-    out_img[nonzeroy[left_lane_inds], nonzerox[left_lane_inds]] = [255, 0, 0]
-    out_img[nonzeroy[right_lane_inds], nonzerox[right_lane_inds]] = [0, 0, 255]
+    out_img[nonzeroy[left_lane.indices], nonzerox[left_lane.indices]] = [255, 0, 0]
+    out_img[nonzeroy[right_lane.indices], nonzerox[right_lane.indices]] = [0, 0, 255]
 
-    for left_win, right_win in zip(left_lane_windows, right_lane_windows):
+    for left_win, right_win in zip(left_lane.detection_windows, right_lane.detection_windows):
         # Draw the windows on the visualization image
         cv2.rectangle(out_img, left_win[0], left_win[1], (0, 255, 0), 2)
         cv2.rectangle(out_img, right_win[0], right_win[1], (0, 255, 0), 2)
@@ -151,7 +154,7 @@ def plot_sliding_windows(binary_warped, left_fit, right_fit, left_lane_inds, rig
 
 def main():
     from glob import glob
-    from camera_calibration import default_camera_calibration
+    from camera_calibration import CameraCalibration
     from thresholding import threshold
     from transform import PerspectiveTransform
 
@@ -161,20 +164,12 @@ def main():
 
     # Prepare camera calibration
     print("Calibrating camera")
-    calibration = default_camera_calibration()
+    calibration = CameraCalibration.default()
 
     # Prepare perspective transform
-    poly_height = int(height * .35)
-    bottom_offset = 80
-    top_offset = 120
-    polygon = [[bottom_offset, height], [width // 2 - top_offset, height - poly_height],
-               [width // 2 + top_offset, height - poly_height], [width - bottom_offset, height]]
+    transform = PerspectiveTransform.default(height, width)
 
-    print("Calculating perspective transform matrix")
-    dst = [[bottom_offset, height], [bottom_offset, 0], [width - bottom_offset, 0], [width - bottom_offset, height]]
-    transform = PerspectiveTransform(np.float32(polygon), np.float32(dst))
-
-    images = glob('test_images/test*')
+    images = glob('test_images/straight*') + glob('test_images/test*')
 
     for fname in images:
         print("Processing", fname)
@@ -187,12 +182,10 @@ def main():
         img = transform.transform(img)
 
         # Find lines using sliding windows
-        left_fit, right_fit, left_lane_inds, right_lane_inds, left_lane_windows, right_lane_windows = find_lines_with_sliding_windows(
-            img)
+        left_lane, right_lane = find_lines_with_sliding_windows(img)
 
         # Plot sliding windows
-        plot_sliding_windows(img, left_fit, right_fit, left_lane_inds, right_lane_inds, left_lane_windows,
-                             right_lane_windows)
+        plot_sliding_windows(img, left_lane, right_lane)
 
         # combined_binary, color_binary = threshold(img, stack=True)
         #

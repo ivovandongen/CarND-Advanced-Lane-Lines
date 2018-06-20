@@ -52,39 +52,39 @@ class CameraCalibration:
     def save_to_file(self, file):
         pickle.dump(self, file)
 
+    @staticmethod
+    def load_from(file):
+        return pickle.load(file)
 
-def load_from(file):
-    return pickle.load(file)
+    @staticmethod
+    def default(reset=False):
+        file = 'camera_calibration.p'
 
+        # Try to load saved calibration
+        if not reset and path.exists(file):
+            try:
+                print("Return saved camera calibration")
+                with open(file, 'rb') as f:
+                    return CameraCalibration.load_from(f)
+            except Exception as e:
+                print("Could not load camera calibration from pickle file", e)
 
-def default_camera_calibration(reset=False):
-    file = 'camera_calibration.p'
+        # Fall back to re-calibration
+        print("Calibrating camera")
+        calibration = CameraCalibration()
+        calibration.calibrate(glob('camera_cal/calibration*'), checkerboard_shape=(9, 6), img_shape=(1280, 720))
 
-    # Try to load saved calibration
-    if not reset and path.exists(file):
-        try:
-            print("Return saved camera calibration")
-            with open(file, 'rb') as f:
-                return load_from(f)
-        except Exception as e:
-            print("Could not load camera calibration from pickle file", e)
+        with open(file, 'wb') as f:
+            print("Saving calibration for next run")
+            calibration.save_to_file(f)
 
-    # Fall back to re-calibration
-    print("Calibrating camera")
-    calibration = CameraCalibration()
-    calibration.calibrate(glob('camera_cal/calibration*'), checkerboard_shape=(9, 6), img_shape=(1280, 720))
-
-    with open(file, 'wb') as f:
-        print("Saving calibration for next run")
-        calibration.save_to_file(f)
-
-    return calibration
+        return calibration
 
 
 def main():
     # Make a list of calibration images
     print("Calculating distortion matrix")
-    calibration = default_camera_calibration()
+    calibration = CameraCalibration.default()
 
     images = glob('camera_cal/calibration*.jpg')
     print("Showing undistorted images")

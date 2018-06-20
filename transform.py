@@ -4,49 +4,96 @@ import matplotlib.pyplot as plt
 from glob import glob
 
 
-class PerspectiveTransform:
+class Transform:
 
-    def __init__(self, src, dst):
-        self.M = cv2.getPerspectiveTransform(src, dst)
-        self.Minv = cv2.getPerspectiveTransform(dst, src)
+    def transform(self, image):
+        return image
 
-    def transform(self, image, img_size=None):
+    def invert(self):
+        return self
+
+    def x_scale(self):
+        return 1
+
+    def y_scale(self):
+        return 1
+
+
+class PerspectiveTransform(Transform):
+    """
+    Manages bi-directional perspective transformations
+    """
+
+    def __init__(self, src, dst, src_size, dst_size, M=None, Minv=None):
+        self.src = src
+        self.src_size = src_size
+        self.dst = dst
+        self.dst_size = dst_size
+        self.M = M if M is not None else cv2.getPerspectiveTransform(src, dst)
+        self.Minv = Minv if Minv is not None else cv2.getPerspectiveTransform(dst, src)
+
+    def transform(self, image):
         return cv2.warpPerspective(image, self.M,
-                                   img_size if img_size is not None else (image.shape[1], image.shape[0]),
+                                   (self.dst_size[1], self.dst_size[0]),
                                    flags=cv2.INTER_LINEAR)
 
-    def inverse(self, image, img_size=None):
-        return cv2.warpPerspective(image, self.Minv,
-                                   img_size if img_size is not None else (image.shape[1], image.shape[0]),
-                                   flags=cv2.INTER_LINEAR)
+    def invert(self):
+        return PerspectiveTransform(src=self.dst, dst=self.src,
+                                    src_size=self.dst_size, dst_size=self.src_size,
+                                    M=self.Minv, Minv=self.M)
+
+    def x_scale(self):
+        return self.src_size[1] / self.dst_size[1]
+
+    def y_scale(self):
+        return self.src_size[0] / self.dst_size[0]
+
+    @staticmethod
+    def default(height=720, width=1280):
+        print("Calculating perspective transform matrix")
+
+        poly_height = int(height * .375)  # int(height * .35)
+        bottom_offset_left = 80
+        bottom_offset_right = bottom_offset_left
+        bottom_margin = 0
+        top_offset = 55
+        polygon = [[bottom_offset_left, height - bottom_margin],
+                   [width // 2 - top_offset, height - poly_height],
+                   [width // 2 + top_offset, height - poly_height],
+                   [width - bottom_offset_right, height - bottom_margin]]
+
+        margin_x = 200
+        dst_height = height * 3
+        dst_width = width
+        dst = [[margin_x, dst_height],
+               [margin_x, 0],
+               [dst_width - margin_x, 0],
+               [dst_width - margin_x, dst_height]]
+
+        return PerspectiveTransform(np.float32(polygon), np.float32(dst), src_size=(height, width),
+                                    dst_size=(dst_height, dst_width))
 
 
 def main():
-
-    # Fixed image dimensions
+    # # Fixed image dimensions
     height = 720
     width = 1280
+    transform = PerspectiveTransform.default(height, width)
+    from camera_calibration import CameraCalibration
+    calibration = CameraCalibration.default()
 
-    poly_height = int(height * .35)
-    bottom_offset = 80
-    top_offset = 120
-    polygon = [[bottom_offset, height], [width // 2 - top_offset, height - poly_height], [width // 2 + top_offset, height - poly_height], [width - bottom_offset, height]]
-
-    print("Calculating perspective transform matrix")
-    dst = [[bottom_offset, height], [bottom_offset, 0], [width - bottom_offset, 0], [width - bottom_offset, height]]
-    transform = PerspectiveTransform(np.float32(polygon), np.float32(dst))
-
-    images = glob('test_images/test*')
+    images = glob('test_images/straight*') + glob('test_images/test*')
 
     for fname in images:
         print("Processing", fname)
         image = cv2.cvtColor(cv2.imread(fname), cv2.COLOR_BGR2RGB)
+        image = calibration.undistort(image)
 
-        polygonned = cv2.polylines(np.copy(image), np.array([polygon]), False, color=255, thickness=2)
+        polygonned = cv2.polylines(np.copy(image), [np.int32(transform.src)], False, color=255, thickness=1)
 
-        transformed = transform.transform(np.copy(polygonned), (width, height))
+        transformed = transform.transform(np.copy(polygonned))
 
-        inversed = transform.inverse(np.copy(transformed), (width, height))
+        inversed = transform.invert().transform(np.copy(transformed))
 
         f, (ax1, ax2, ax3, ax4) = plt.subplots(1, 4, figsize=(32, 9))
         ax1.set_title('Original', fontsize=20)

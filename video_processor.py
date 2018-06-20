@@ -1,7 +1,7 @@
 import numpy as np
 import cv2
 from moviepy.editor import VideoFileClip
-from camera_calibration import default_camera_calibration
+from camera_calibration import CameraCalibration
 from transform import PerspectiveTransform
 from thresholding import threshold
 from lane import Lane
@@ -30,24 +30,13 @@ class VideoProcessor:
 
     @staticmethod
     def create_camera_calibration():
-        return default_camera_calibration()
+        return CameraCalibration.default()
 
     @staticmethod
     def create_transform(image_size):
         height = image_size[0]
         width = image_size[1]
-
-        # Prepare perspective transform
-        poly_height = int(height * .35)
-        bottom_offset = 80
-        bottom_margin = 40
-        top_offset = 120
-        polygon = [[bottom_offset, height - bottom_margin], [width // 2 - top_offset, height - poly_height],
-                   [width // 2 + top_offset, height - poly_height], [width - bottom_offset, height - bottom_margin]]
-
-        print("Calculating perspective transform matrix")
-        dst = [[bottom_offset, height], [bottom_offset, 0], [width - bottom_offset, 0], [width - bottom_offset, height]]
-        return PerspectiveTransform(np.float32(polygon), np.float32(dst))
+        return PerspectiveTransform.default(height, width)
 
     def process(self, sub_clip=None):
         """
@@ -90,18 +79,19 @@ class VideoProcessor:
     def _process_image(self, org_image):
         # Create the warped binary image (birds-eye view with lane lines highlighted)
         undistorted_image = self.calibration.undistort(np.copy(org_image))
-        threshold_image, _ = threshold(undistorted_image, stack=False)
-        warped_image = self.transform.transform(threshold_image)
+        warped_image = self.transform.transform(undistorted_image)
+        warped_image, _ = threshold(warped_image, stack=False)
 
         # Update our lane tracker
         self.lane.update(warped_image=warped_image)
 
         # Add the lane overlay to our original image
-        org_image = self.lane.overlay(org_image, transform_fn=lambda x: self.transform.inverse(x))
+        org_image = self.lane.overlay(org_image, transform=self.transform.invert())
+        self.lane.overlay_curvature(org_image)
 
         # Create picture-in-picture overlays
         birds_eye_overlay = self.create_birds_eye_view(warped_image)
-        binary_overlay = self.scale_image(np.dstack((threshold_image, threshold_image, threshold_image)) * 255)
+        binary_overlay = self.scale_image(np.dstack((warped_image, warped_image, warped_image)) * 255)
 
         # Overlay picture-in-picture style on original
         self.add_image_overlay(org_image, binary_overlay)
@@ -116,7 +106,9 @@ def main():
     output_file = 'output_videos/processed_project_video.mp4'
     processor = VideoProcessor(input_file=input_file, output_file=output_file, image_size=(720, 1280))
     print("Processing video", input_file, output_file)
-    processor.process(sub_clip=(38, 42))
+    # processor.process(sub_clip=(38, 42))
+    # processor.process()
+    processor.process(sub_clip=(0, 20))
 
 
 if __name__ == '__main__':
