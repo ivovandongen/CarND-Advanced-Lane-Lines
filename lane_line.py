@@ -1,5 +1,3 @@
-import math
-
 import numpy as np
 
 
@@ -9,6 +7,11 @@ class LaneLine():
         self.indices = indices
         self.detection_windows = detection_windows
         self.image_shape = image_shape
+        self.image_scale = (self.image_shape[0] / 720)
+        self.yscale = 30 / 720 / self.image_scale  # Real world metres per y pixel
+        self.xscale = 3.7 / 700  # Real world metres per x pixel
+        self.offset_m = (self.calculate_points_along_line(image_shape[0]) - self.image_shape[1] // 2) * self.xscale
+
         # # was the line detected in the last iteration?
         # self.detected = False
         # # x values of the last n fits of the line
@@ -37,16 +40,12 @@ class LaneLine():
         return self.poly[0] * y_points ** 2 + self.poly[1] * y_points + self.poly[2]
 
     def calculate_curvature_m(self):
-        image_scale = (self.image_shape[0] / 720)
-        yscale = 30 / 720 / image_scale  # Real world metres per y pixel
-        xscale = 3.7 / 700  # Real world metres per x pixel
-
         # Convert polynomial to set of points for refitting
         ploty = np.linspace(0, self.image_shape[0] * 3 - 1, self.image_shape[0])
-        fitx = self.poly[0] * ploty ** 2 + self.poly[1] * ploty + self.poly[2]
+        fitx = self.poly[0] * ploty ** 2 + self.poly[1] * ploty + self.poly[2] # todo reuse calculate_points
 
         # Fit new polynomial
-        fit_cr = np.polyfit(ploty * yscale, fitx * xscale, 2)
+        fit_cr = np.polyfit(ploty * self.yscale, fitx * self.xscale, 2)
 
         # Calculate curve radius
-        return ((1 + (2 * fit_cr[0] * np.max(ploty) * yscale + fit_cr[1]) ** 2) ** 1.5) / np.absolute(2 * fit_cr[0])
+        return ((1 + (2 * fit_cr[0] * np.max(ploty) * self.yscale + fit_cr[1]) ** 2) ** 1.5) / np.absolute(2 * fit_cr[0])

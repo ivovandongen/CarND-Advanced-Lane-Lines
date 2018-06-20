@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 from collections import deque
 from glob import glob
+import math
 
 from camera_calibration import CameraCalibration
 from transform import PerspectiveTransform, Transform
@@ -49,19 +50,35 @@ class DetectionFrame:
         self.left_lane = left
         self.right_lane = right
         self.curvature_m = None
+        self.lane_width_m = None
+        self.offset_m = None
 
     def is_valid(self):
         # TODO
         # - Check distance between
         # - Check if parallel
         # - Check if similar curvature
-        return self.left_lane.is_valid() and self.right_lane.is_valid()
+        return self.left_lane.is_valid() \
+               and self.right_lane.is_valid() \
+               and (abs(self.calculate_lane_width_m() - 3.7) < .8)
 
     def calculate_curvature_m(self):
         if self.curvature_m is None:
             self.curvature_m = (self.left_lane.calculate_curvature_m() + self.right_lane.calculate_curvature_m()) / 2
 
         return self.curvature_m
+
+    def calculate_offset_m(self):
+        if self.offset_m is None:
+            self.offset_m = -(self.left_lane.offset_m + self.right_lane.offset_m)
+
+        return self.offset_m
+
+    def calculate_lane_width_m(self):
+        if self.lane_width_m is None:
+            self.lane_width_m = self.right_lane.offset_m - self.left_lane.offset_m
+
+        return self.lane_width_m
 
 
 class Lane:
@@ -131,8 +148,8 @@ class Lane:
             print("skipping")
             return image
 
-    def overlay_curvature(self, image, bottomLeftCornerOfText=(10, 500), fontScale=1, fontColor=(255, 255, 255),
-                          lineType=2, font=cv2.FONT_HERSHEY_SIMPLEX, debug=False):
+    def overlay_curvature_offset(self, image, bottomLeftCornerOfText=(10, 500), fontScale=1, fontColor=(255, 255, 255),
+                                 lineType=2, font=cv2.FONT_HERSHEY_SIMPLEX, debug=False):
         if self.last_valid_frame is not None:
             if debug:
                 text = "Left: {}, right: {}, Avg: ".format(self.last_valid_frame.left_lane.calculate_curvature_m(),
@@ -140,7 +157,11 @@ class Lane:
                                                            self.last_valid_frame.calculate_curvature_m())
             else:
                 radius = self.curve_radius()
+                offset = self.last_valid_frame.calculate_offset_m()
+                lane_width = self.last_valid_frame.calculate_lane_width_m()
                 text = "Curve radius: {:6.2f}m".format(radius) if radius < 5000 else "Curve radius is straight"
+                text += ". Offset: {:6.2f}m".format(offset)
+                text += ". Lane width: {:6.2f}m".format(lane_width)
 
             return cv2.putText(image,
                                text,
@@ -182,7 +203,7 @@ def main():
         lane = Lane()
         lane.update(warped_binary)
         final = lane.overlay(org_image, draw_lines=False, fill_lane=True, transform=transform.invert())
-        final = lane.overlay_curvature(final)
+        final = lane.overlay_curvature_offset(final)
         final = cv2.polylines(final, [np.int32(transform.src)], color=[255, 0, 0], isClosed=False)
 
         cv2.imwrite('output_images/lane_{}'.format(fname.split('/')[-1]), final)

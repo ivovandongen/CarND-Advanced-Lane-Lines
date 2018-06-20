@@ -33,7 +33,8 @@ def find_lines_from_previous(binary_warped, left_line: LaneLine, right_lane: Lan
     left_fit = np.polyfit(lefty, leftx, 2)
     right_fit = np.polyfit(righty, rightx, 2)
 
-    return LaneLine(left_fit, left_lane_inds, binary_warped.shape), LaneLine(right_fit, right_lane_inds, binary_warped.shape)
+    return LaneLine(left_fit, left_lane_inds, binary_warped.shape), \
+           LaneLine(right_fit, right_lane_inds, binary_warped.shape)
 
 
 def find_lines_with_sliding_windows(binary_warped, num_windows=9, window_margin=100, pixel_threshold=50):
@@ -119,9 +120,8 @@ def find_lines_with_sliding_windows(binary_warped, num_windows=9, window_margin=
     left_fit = np.polyfit(lefty, leftx, 2) if len(lefty) > 0 and len(leftx) > 0 else [np.array([False])]
     right_fit = np.polyfit(righty, rightx, 2) if len(righty) > 0 and len(rightx) > 0 else [np.array([False])]
 
-    return LaneLine(left_fit, left_lane_inds, binary_warped.shape, left_lane_windows), LaneLine(right_fit, right_lane_inds,
-                                                                                                binary_warped.shape,
-                                                                                                right_lane_windows)
+    return LaneLine(left_fit, left_lane_inds, binary_warped.shape, left_lane_windows), \
+           LaneLine(right_fit, right_lane_inds, binary_warped.shape, right_lane_windows)
 
 
 def plot_sliding_windows(binary_warped, left_lane: LaneLine, right_lane: LaneLine):

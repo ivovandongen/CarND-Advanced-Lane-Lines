@@ -87,7 +87,7 @@ class VideoProcessor:
 
         # Add the lane overlay to our original image
         org_image = self.lane.overlay(org_image, transform=self.transform.invert())
-        self.lane.overlay_curvature(org_image)
+        self.lane.overlay_curvature_offset(org_image)
 
         # Create picture-in-picture overlays
         birds_eye_overlay = self.create_birds_eye_view(warped_image)
