@@ -18,8 +18,8 @@ def _draw_lane_overlay(img, left_lane: LaneLine, right_lane: LaneLine, transform
     overlay = np.zeros((height, img.shape[1], img.shape[2])).astype(np.uint8)#np.zeros_like(img).astype(np.uint8)
 
     # Calculate points.
-    left_fitx = left_lane.calculate_points_along_line(y_points)
-    right_fitx = right_lane.calculate_points_along_line(y_points)
+    left_fitx = left_lane.fit_x
+    right_fitx = right_lane.fit_x
 
     # Create lists of points for both lines
     pts_left = np.transpose(np.vstack([left_fitx, y_points]))
@@ -49,36 +49,19 @@ class DetectionFrame:
     def __init__(self, left: LaneLine, right: LaneLine):
         self.left_lane = left
         self.right_lane = right
-        self.curvature_m = None
-        self.lane_width_m = None
-        self.offset_m = None
+        if left.is_valid() and right.is_valid():
+            self.curvature_m = (self.left_lane.calculate_curvature_m() + self.right_lane.calculate_curvature_m()) / 2
+            self.lane_width_start_m = self.right_lane.offset_start_m - self.left_lane.offset_start_m
+            self.offset_m = -(self.left_lane.offset_start_m + self.right_lane.offset_start_m)
 
     def is_valid(self):
         # TODO
-        # - Check distance between
+        # -
         # - Check if parallel
         # - Check if similar curvature
         return self.left_lane.is_valid() \
                and self.right_lane.is_valid() \
-               and (abs(self.calculate_lane_width_m() - 3.7) < .8)
-
-    def calculate_curvature_m(self):
-        if self.curvature_m is None:
-            self.curvature_m = (self.left_lane.calculate_curvature_m() + self.right_lane.calculate_curvature_m()) / 2
-
-        return self.curvature_m
-
-    def calculate_offset_m(self):
-        if self.offset_m is None:
-            self.offset_m = -(self.left_lane.offset_m + self.right_lane.offset_m)
-
-        return self.offset_m
-
-    def calculate_lane_width_m(self):
-        if self.lane_width_m is None:
-            self.lane_width_m = self.right_lane.offset_m - self.left_lane.offset_m
-
-        return self.lane_width_m
+               and (abs(self.lane_width_start_m - 3.7) < .5) # Check distance between lines
 
 
 class Lane:
@@ -88,30 +71,41 @@ class Lane:
 
     def __init__(self):
         self.history = deque(maxlen=60)
+        self.invalid_counter = 0
         self.last_valid_frame = None
 
-    def curve_radius(self):
-        curves = np.array([frame.calculate_curvature_m() for frame in self.history if frame is not None])
-        curves = curves[abs(curves - np.mean(curves)) < 1 * np.std(curves)] if len(curves) > 1 else curves
-        return np.mean(curves) if len(curves) > 0 else -1
-
-    def update(self, warped_image):
+    def _detect_frame(self, warped_image):
         # First try with a previous frame
         if self.last_valid_frame is not None:
             left_lane, right_lane = find_lines_from_previous(warped_image, self.last_valid_frame.left_lane,
                                                              self.last_valid_frame.right_lane)
             frame = DetectionFrame(left_lane, right_lane)
             if frame.is_valid():
-                self.history.append(frame)
-                self.last_valid_frame = frame
-                return
+                return frame
 
         print("Initial detection")
         left_lane, right_lane = find_lines_with_sliding_windows(warped_image)
         frame = DetectionFrame(left_lane, right_lane)
         if frame.is_valid():
+            return frame
+
+        return None
+
+    def curve_radius(self):
+        curves = np.array([frame.curvature_m for frame in self.history if frame is not None])
+        curves = curves[abs(curves - np.mean(curves)) < 1 * np.std(curves)] if len(curves) > 1 else curves
+        return np.mean(curves) if len(curves) > 0 else -1
+
+    def update(self, warped_image):
+        frame = self._detect_frame(warped_image)
+
+        if frame is not None:
             self.history.append(frame)
             self.last_valid_frame = frame
+            self.invalid_counter = 0
+        else:
+            self.invalid_counter += 1
+            print("Invalid frames", self.invalid_counter)
 
         # TODO: fall back on history if possible (or do when drawing)
 
@@ -157,8 +151,8 @@ class Lane:
                                                            self.last_valid_frame.calculate_curvature_m())
             else:
                 radius = self.curve_radius()
-                offset = self.last_valid_frame.calculate_offset_m()
-                lane_width = self.last_valid_frame.calculate_lane_width_m()
+                offset = self.last_valid_frame.offset_m
+                lane_width = self.last_valid_frame.lane_width_start_m
                 text = "Curve radius: {:6.2f}m".format(radius) if radius < 5000 else "Curve radius is straight"
                 text += ". Offset: {:6.2f}m".format(offset)
                 text += ". Lane width: {:6.2f}m".format(lane_width)

@@ -10,7 +10,10 @@ class LaneLine():
         self.image_scale = (self.image_shape[0] / 720)
         self.yscale = 30 / 720 / self.image_scale  # Real world metres per y pixel
         self.xscale = 3.7 / 700  # Real world metres per x pixel
-        self.offset_m = (self.calculate_points_along_line(image_shape[0]) - self.image_shape[1] // 2) * self.xscale
+        self.fit_y = np.linspace(0, self.image_shape[0] - 1, self.image_shape[0])
+        self.fit_x = self.calculate_points_along_line(self.poly, self.fit_y)
+        self.offset_start_m = (self.calculate_points_along_line(self.poly, image_shape[0]) - self.image_shape[1] // 2) * self.xscale
+        # self.offset_end_m = (self.calculate_points_along_line(0) - self.image_shape[1] // 2) * self.xscale
 
         # # was the line detected in the last iteration?
         # self.detected = False
@@ -33,19 +36,16 @@ class LaneLine():
         # # y values for detected line pixels
         # self.ally = None
 
+    @staticmethod
+    def calculate_points_along_line(poly, y_points):
+        return poly[0] * y_points ** 2 + poly[1] * y_points + poly[2]
+
     def is_valid(self):
         return len(self.poly) >= 3
 
-    def calculate_points_along_line(self, y_points):
-        return self.poly[0] * y_points ** 2 + self.poly[1] * y_points + self.poly[2]
-
     def calculate_curvature_m(self):
-        # Convert polynomial to set of points for refitting
-        ploty = np.linspace(0, self.image_shape[0] * 3 - 1, self.image_shape[0])
-        fitx = self.poly[0] * ploty ** 2 + self.poly[1] * ploty + self.poly[2] # todo reuse calculate_points
-
         # Fit new polynomial
-        fit_cr = np.polyfit(ploty * self.yscale, fitx * self.xscale, 2)
+        fit_cr = np.polyfit(self.fit_y * self.yscale, self.fit_x * self.xscale, 2)
 
         # Calculate curve radius
-        return ((1 + (2 * fit_cr[0] * np.max(ploty) * self.yscale + fit_cr[1]) ** 2) ** 1.5) / np.absolute(2 * fit_cr[0])
+        return ((1 + (2 * fit_cr[0] * np.max(self.fit_y) * self.yscale + fit_cr[1]) ** 2) ** 1.5) / np.absolute(2 * fit_cr[0])

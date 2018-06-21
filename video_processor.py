@@ -107,8 +107,8 @@ def main():
     processor = VideoProcessor(input_file=input_file, output_file=output_file, image_size=(720, 1280))
     print("Processing video", input_file, output_file)
     # processor.process(sub_clip=(38, 42))
-    # processor.process()
-    processor.process(sub_clip=(0, 20))
+    processor.process()
+    # processor.process(sub_clip=(0, 20))
 
 
 if __name__ == '__main__':

@@ -127,8 +127,8 @@ def find_lines_with_sliding_windows(binary_warped, num_windows=9, window_margin=
 def plot_sliding_windows(binary_warped, left_lane: LaneLine, right_lane: LaneLine):
     # Generate x and y values for plotting
     ploty = np.linspace(0, binary_warped.shape[0] - 1, binary_warped.shape[0])
-    left_fitx = left_lane.calculate_points_along_line(ploty)
-    right_fitx = right_lane.calculate_points_along_line(ploty)
+    left_fitx = left_lane.fit_x
+    right_fitx = right_lane.fit_x
 
     # Create an output image to draw on and  visualize the result
     # Identify the x and y positions of all nonzero pixels in the image
