@@ -3,23 +3,29 @@ from line_locator import find_lines_with_sliding_windows, find_lines_from_previo
 import cv2
 import numpy as np
 from collections import deque
+from itertools import islice
 from glob import glob
-import math
 
 from camera_calibration import CameraCalibration
 from transform import PerspectiveTransform, Transform
 from thresholding import threshold
 
 
-def _draw_lane_overlay(img, left_lane: LaneLine, right_lane: LaneLine, transform, draw_lines=False,
+def _draw_lane_overlay(img, left_fitx, right_fitx, transform, draw_lines=False,
                        fill_lane=True):
+    """
+    Draws the lane polygon and or lines on the provided image
+    :param img: the input image to overlay on
+    :param left_fitx: the fitted x coordinates of the left lane line on a linear y-plane of the image after transform
+    :param right_fitx: same for the right lane
+    :param transform: the transform to convert the lane back onto the image
+    :param draw_lines: True if lane lines need to be drawn
+    :param fill_lane: True if the lane fill needs to be drawn
+    :return: the image with the requested overlays
+    """
     height = int(img.shape[0] * transform.y_scale())
     y_points = np.linspace(0, height - 1, height)
-    overlay = np.zeros((height, img.shape[1], img.shape[2])).astype(np.uint8)#np.zeros_like(img).astype(np.uint8)
-
-    # Calculate points.
-    left_fitx = left_lane.fit_x
-    right_fitx = right_lane.fit_x
+    overlay = np.zeros((height, img.shape[1], img.shape[2])).astype(np.uint8)
 
     # Create lists of points for both lines
     pts_left = np.transpose(np.vstack([left_fitx, y_points]))
@@ -45,23 +51,32 @@ def _draw_lane_overlay(img, left_lane: LaneLine, right_lane: LaneLine, transform
 
 
 class DetectionFrame:
+    """
+    Represents line detections in a single frame
+    """
 
     def __init__(self, left: LaneLine, right: LaneLine):
         self.left_lane = left
         self.right_lane = right
         if left.is_valid() and right.is_valid():
-            self.curvature_m = (self.left_lane.calculate_curvature_m() + self.right_lane.calculate_curvature_m()) / 2
+            # print(self.left_lane.curvature_m, self.right_lane.curvature_m)
+            self.curvature_m = (self.left_lane.curvature_m + self.right_lane.curvature_m) / 2
             self.lane_width_start_m = self.right_lane.offset_start_m - self.left_lane.offset_start_m
             self.offset_m = -(self.left_lane.offset_start_m + self.right_lane.offset_start_m)
 
     def is_valid(self):
         # TODO
-        # -
         # - Check if parallel
-        # - Check if similar curvature
         return self.left_lane.is_valid() \
                and self.right_lane.is_valid() \
-               and (abs(self.lane_width_start_m - 3.7) < .5) # Check distance between lines
+               and self.lane_width_valid() \
+               and self.lane_line_curvatures_valid()
+
+    def lane_line_curvatures_valid(self):
+        return abs(self.left_lane.curvature_m - self.right_lane.curvature_m) < 100
+
+    def lane_width_valid(self):
+        return abs(self.lane_width_start_m - 3.7) < .5
 
 
 class Lane:
@@ -70,15 +85,19 @@ class Lane:
     """
 
     def __init__(self):
-        self.history = deque(maxlen=60)
+        self.history = deque(maxlen=30)
         self.invalid_counter = 0
-        self.last_valid_frame = None
+
+    def previous_frame(self):
+        return self.history[0] if len(self.history) > 0 else None
 
     def _detect_frame(self, warped_image):
         # First try with a previous frame
-        if self.last_valid_frame is not None:
-            left_lane, right_lane = find_lines_from_previous(warped_image, self.last_valid_frame.left_lane,
-                                                             self.last_valid_frame.right_lane)
+        previous_frame = self.previous_frame()
+        if previous_frame is not None:
+            left_lane, right_lane = find_lines_from_previous(warped_image,
+                                                             previous_frame.left_lane,
+                                                             previous_frame.right_lane)
             frame = DetectionFrame(left_lane, right_lane)
             if frame.is_valid():
                 return frame
@@ -91,50 +110,52 @@ class Lane:
 
         return None
 
-    def curve_radius(self):
+    def _curve_radius_average(self):
+        """
+        Calculates the average radius over the available frame history
+        :return: the radius (float)
+        """
         curves = np.array([frame.curvature_m for frame in self.history if frame is not None])
         curves = curves[abs(curves - np.mean(curves)) < 1 * np.std(curves)] if len(curves) > 1 else curves
         return np.mean(curves) if len(curves) > 0 else -1
 
+    def _lane_lines_average(self):
+        """
+        Averages the lane lines over (a part of) the available frame history
+        :return: the fitted x coordinates for left, right (or None, None if history is not available)
+        """
+        if len(self.history) == 0:
+            return None, None
+
+        end_index = min(len(self.history), 3)
+        left_lanes = np.mean([frame.left_lane.fit_x for frame in islice(self.history, end_index)], axis=0)
+        right_lanes = np.mean([frame.right_lane.fit_x for frame in islice(self.history, end_index)], axis=0)
+        return left_lanes, right_lanes
+
     def update(self, warped_image):
+        """
+        Call to update the lane with the most recent frame or still image
+        :param warped_image: the warped binary image representing the video frame or still image
+        :return: True a detection could be made
+        """
         frame = self._detect_frame(warped_image)
 
         if frame is not None:
             self.history.append(frame)
-            self.last_valid_frame = frame
             self.invalid_counter = 0
+            return True
         else:
             self.invalid_counter += 1
             print("Invalid frames", self.invalid_counter)
+            return False
 
-        # TODO: fall back on history if possible (or do when drawing)
-
-        # if self.last_valid_frame is None:  # TODO self.last_valid_frame is None #len(self.history) == 0:
-        #     print("Initial detection")
-        #     left_lane, right_lane = find_lines_with_sliding_windows(warped_image)
-        #     frame = DetectionFrame(left_lane, right_lane)
-        #     self.history.append(frame)
-        #     if frame.is_valid():
-        #         self.last_valid_frame = frame
-        #     #TODO: Else....
-        #     # else:
-        #     #     self.last_valid_frame
-        # else:
-        #     left_lane, right_lane = find_lines_from_previous(warped_image, self.last_valid_frame.left_lane, self.last_valid_frame.right_lane)
-        #     frame = DetectionFrame(left_lane, right_lane)
-        #     if frame.is_valid():
-        #         self.last_valid_frame = frame
-
-        # TODO:
-        # - check history of last x frames
-
-    def overlay(self, image, transform:Transform=Transform(), draw_lines=False, fill_lane=True):
+    def overlay(self, image, transform: Transform = Transform(), draw_lines=False, fill_lane=True):
         # Ensure the polyfit could be calculated
-        if self.last_valid_frame is not None:
-            # print(self.last_valid_frame.left_lane.calculate_curvature_m(),
-            #       self.last_valid_frame.right_lane.calculate_curvature_m())
-            frame = self.last_valid_frame
-            return _draw_lane_overlay(image, frame.left_lane, frame.right_lane,
+        avg_left, avg_right = self._lane_lines_average()
+        if avg_left is not None and avg_right is not None:
+            return _draw_lane_overlay(image,
+                                      avg_left,
+                                      avg_right,
                                       transform=transform,
                                       draw_lines=draw_lines,
                                       fill_lane=fill_lane)
@@ -142,30 +163,25 @@ class Lane:
             print("skipping")
             return image
 
-    def overlay_curvature_offset(self, image, bottomLeftCornerOfText=(10, 500), fontScale=1, fontColor=(255, 255, 255),
-                                 lineType=2, font=cv2.FONT_HERSHEY_SIMPLEX, debug=False):
-        if self.last_valid_frame is not None:
-            if debug:
-                text = "Left: {}, right: {}, Avg: ".format(self.last_valid_frame.left_lane.calculate_curvature_m(),
-                                                           self.last_valid_frame.right_lane.calculate_curvature_m(),
-                                                           self.last_valid_frame.calculate_curvature_m())
-            else:
-                radius = self.curve_radius()
-                offset = self.last_valid_frame.offset_m
-                lane_width = self.last_valid_frame.lane_width_start_m
-                text = "Curve radius: {:6.2f}m".format(radius) if radius < 5000 else "Curve radius is straight"
-                text += ". Offset: {:6.2f}m".format(offset)
-                text += ". Lane width: {:6.2f}m".format(lane_width)
+    def overlay_text(self, image, anchor_point=(10, 500), font_scale=1, font_color=(255, 255, 255),
+                     line_type=2, font=cv2.FONT_HERSHEY_COMPLEX):
+        previous_frame = self.previous_frame()
+        if previous_frame is not None:
+            radius = self._curve_radius_average()
+            entries = list()
+            entries.append(("Radius:", "{: >10.2f}m".format(radius) if radius < 5000 else "    straight"))
+            entries.append(("Offset:", "{: >10.2f}m".format(previous_frame.offset_m)))  # todo: average?
+            entries.append(("Lane width:", "{: >10.2f}m".format(previous_frame.lane_width_start_m)))  # todo average?
 
-            return cv2.putText(image,
-                               text,
-                               bottomLeftCornerOfText,
-                               font,
-                               fontScale,
-                               fontColor,
-                               lineType)
-        else:
-            return image
+            for i, l in enumerate(entries):
+                y1 = anchor_point[1] + (i * 70)
+                y2 = y1 + 30
+                x1 = anchor_point[0]
+                x2 = anchor_point[0] + 50
+                image = cv2.putText(image, l[0], (x1, y1), font, font_scale, font_color, line_type)
+                image = cv2.putText(image, l[1], (x2, y2), font, font_scale, font_color, line_type)
+
+        return image
 
 
 def main():
@@ -197,7 +213,7 @@ def main():
         lane = Lane()
         lane.update(warped_binary)
         final = lane.overlay(org_image, draw_lines=False, fill_lane=True, transform=transform.invert())
-        final = lane.overlay_curvature_offset(final)
+        final = lane.overlay_text(final)
         final = cv2.polylines(final, [np.int32(transform.src)], color=[255, 0, 0], isClosed=False)
 
         cv2.imwrite('output_images/lane_{}'.format(fname.split('/')[-1]), final)

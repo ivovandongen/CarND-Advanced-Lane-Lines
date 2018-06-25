@@ -12,12 +12,13 @@ class VideoProcessor:
     Class to help with processing a video
     """
 
-    def __init__(self, input_file, output_file, image_size):
+    def __init__(self, input_file, output_file, image_size, debug=False):
         """
         Creates the processor
         :param input_file: the input video file name
         :param output_file: the output video file name
         :param image_size: the image size of the video
+        :param debug: set to True to get debug output
 
         Use VideoProcessor:process to start processing
         """
@@ -27,6 +28,7 @@ class VideoProcessor:
         self.image_size = image_size
         self.calibration = self.create_camera_calibration()
         self.transform = self.create_transform(self.image_size)
+        self.debug = debug
 
     @staticmethod
     def create_camera_calibration():
@@ -47,7 +49,7 @@ class VideoProcessor:
         clip = VideoFileClip(self.input_file)
         if sub_clip:
             clip = clip.subclip(sub_clip[0], sub_clip[1])
-        out_clip = clip.fl_image(lambda image: self._process_image(image))
+        out_clip = clip.fl(lambda gf, t: self._process_image(gf(t), t))
         out_clip.write_videofile(self.output_file, audio=False)
 
     def scale_image(self, image, scale_factor=3):
@@ -76,18 +78,24 @@ class VideoProcessor:
         image[y_offset:y_offset + overlay.shape[0], x_offset:x_offset + overlay.shape[1]] = overlay
         return image
 
-    def _process_image(self, org_image):
+    def _process_image(self, org_image, t):
         # Create the warped binary image (birds-eye view with lane lines highlighted)
         undistorted_image = self.calibration.undistort(np.copy(org_image))
         warped_image = self.transform.transform(undistorted_image)
         warped_image, _ = threshold(warped_image, stack=False)
 
         # Update our lane tracker
-        self.lane.update(warped_image=warped_image)
+        updated = self.lane.update(warped_image=warped_image)
+        if self.debug and updated:
+            # output the image for analysis
+            cv2.imwrite('output_videos/invalid_frame_{:.3f}_original.png'.format(t),
+                        org_image)
+            cv2.imwrite('output_videos/invalid_frame_{:.3f}_warped.png'.format(t),
+                        np.dstack((warped_image, warped_image, warped_image)) * 255)
 
         # Add the lane overlay to our original image
         org_image = self.lane.overlay(org_image, transform=self.transform.invert())
-        self.lane.overlay_curvature_offset(org_image)
+        self.lane.overlay_text(org_image)
 
         # Create picture-in-picture overlays
         birds_eye_overlay = self.create_birds_eye_view(warped_image)
@@ -104,11 +112,11 @@ class VideoProcessor:
 def main():
     input_file = "test_videos/project_video.mp4"
     output_file = 'output_videos/processed_project_video.mp4'
-    processor = VideoProcessor(input_file=input_file, output_file=output_file, image_size=(720, 1280))
+    processor = VideoProcessor(input_file=input_file, output_file=output_file, image_size=(720, 1280), debug=True)
     print("Processing video", input_file, output_file)
     # processor.process(sub_clip=(38, 42))
-    processor.process()
-    # processor.process(sub_clip=(0, 20))
+    # processor.process()
+    processor.process(sub_clip=(0, 10))
 
 
 if __name__ == '__main__':
