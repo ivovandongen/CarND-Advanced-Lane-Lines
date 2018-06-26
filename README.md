@@ -11,15 +11,6 @@ The goals / steps of this project are the following:
 * Warp the detected lane boundaries back onto the original image.
 * Output visual display of the lane boundaries and numerical estimation of lane curvature and vehicle position.
 
-[//]: # (Image References)
-
-[image1]: ./examples/undistort_output.png "Undistorted"
-[image2]: ./test_images/test1.jpg "Road Transformed"
-[image3]: ./examples/binary_combo_example.jpg "Binary Example"
-[image4]: ./examples/warped_straight_lines.jpg "Warp Example"
-[image5]: ./examples/color_fit_lines.jpg "Fit Visual"
-[image6]: ./examples/example_output.jpg "Output"
-[video1]: ./project_video.mp4 "Video"
 
 ## [Rubric](https://review.udacity.com/#!/rubrics/571/view) Points
 
@@ -65,57 +56,83 @@ An example of the binary result image (and the stacked color representation of t
 ![png](output_images/color-stacked-test1.jpg)
 
 
-#### 3. Describe how (and identify where in your code) you performed a perspective transform and provide an example of a transformed image.
+#### 3. Perspective transform
 
-The code for my perspective transform includes a function called `warper()`, which appears in lines 1 through 8 in the file `example.py` (output_images/examples/example.py) (or, for example, in the 3rd code cell of the IPython notebook).  The `warper()` function takes as inputs an image (`img`), as well as source (`src`) and destination (`dst`) points.  I chose the hardcode the source and destination points in the following manner:
+The code for my perspective transform may be found in the [PerspectiveTransform](transform.py) class.
+
+[PerspectiveTransform#default()](https://github.com/ivovandongen/CarND-Advanced-Lane-Lines/blob/master/transform.py#L52) creates a new instance based on the
+dimensions of the input image. 
 
 ```python
-src = np.float32(
-    [[(img_size[0] / 2) - 55, img_size[1] / 2 + 100],
-    [((img_size[0] / 6) - 10), img_size[1]],
-    [(img_size[0] * 5 / 6) + 60, img_size[1]],
-    [(img_size[0] / 2 + 55), img_size[1] / 2 + 100]])
-dst = np.float32(
-    [[(img_size[0] / 4), 0],
-    [(img_size[0] / 4), img_size[1]],
-    [(img_size[0] * 3 / 4), img_size[1]],
-    [(img_size[0] * 3 / 4), 0]])
+        poly_height = int(height * .35)
+        bottom_offset_left = 60
+        bottom_offset_right = bottom_offset_left
+        bottom_margin = 0
+        top_offset = 94
+        polygon = [[bottom_offset_left, height - bottom_margin],
+                   [width // 2 - top_offset, height - poly_height],
+                   [width // 2 + top_offset, height - poly_height],
+                   [width - bottom_offset_right, height - bottom_margin]]
+
+        margin_x_bottom = 200
+        margin_x_top = 200
+        dst_height = height #* 3
+        dst_width = width
+        dst = [[margin_x_bottom, dst_height],
+               [margin_x_top, 0],
+               [dst_width - margin_x_top, 0],
+               [dst_width - margin_x_bottom, dst_height]]
+        return PerspectiveTransform(np.float32(polygon), np.float32(dst), src_size=(height, width),
+                                    dst_size=(dst_height, dst_width))
 ```
+
+The perspective transform is passed around in order to contain the logic within. In cases where the inverse transform is needed, the transform may be inverted with 
+[PerspectiveTransform#invert()](https://github.com/ivovandongen/CarND-Advanced-Lane-Lines/blob/master/transform.py#L40)
 
 This resulted in the following source and destination points:
 
 | Source        | Destination   | 
 |:-------------:|:-------------:| 
-| 585, 460      | 320, 0        | 
-| 203, 720      | 320, 720      |
-| 1127, 720     | 960, 720      |
-| 695, 460      | 960, 0        |
+| [60, 720]     | [200, 720]    | 
+| [546, 469]    | [200, 0]      |
+| [734, 469]    | [1080, 0]     |
+| [1220, 720]   | [1080, 720]   |
 
 I verified that my perspective transform was working as expected by drawing the `src` and `dst` points onto a test image and its warped counterpart to verify that the lines appear parallel in the warped image.
 
-![alt text][image4]
+![alt text](output_images/transform_straight_lines1.jpg)
 
-#### 4. Describe how (and identify where in your code) you identified lane-line pixels and fit their positions with a polynomial?
+#### 4. Identify lane-line pixels and fit their positions with a polynomial
 
-Then I did some other stuff and fit my lane lines with a 2nd order polynomial kinda like this:
+The code to identify the lane line pixels and fit polynomials to them can be found in [line_locator.py lines 40-124](https://github.com/ivovandongen/CarND-Advanced-Lane-Lines/blob/master/line_locator.py#L40-L124)
 
-![alt text][image5]
+The following steps are taken:
+- A histogram is made from the bottom half of the image to find a peak on the left and right side
+- Then the image is traversed up in windows of a pre-defined size to follow these peaks and find the lines
+- Finally for both lines a polynomial is fit using opencv
 
-#### 5. Describe how (and identify where in your code) you calculated the radius of curvature of the lane and the position of the vehicle with respect to center.
+The result looks like:
+![png](output_images/lane_warped_test6.jpg)
 
-I did this in lines # through # in my code in `my_other_file.py`
+#### 5. Lane curvature and position of car in lane.
 
-#### 6. Provide an example image of your result plotted back down onto the road such that the lane area is identified clearly.
+The lane curvature is first calculated per lane line in [LaneLine#calculate_curvature_m()](https://github.com/ivovandongen/CarND-Advanced-Lane-Lines/blob/master/lane_line.py#L20).
+Then the average of both lines is calculated per detection frame in the [DetectionFrame](https://github.com/ivovandongen/CarND-Advanced-Lane-Lines/blob/master/lane.py#L63) constructor.
+These are then averaged over the available history in [Lane#_curve_radius_average()](https://github.com/ivovandongen/CarND-Advanced-Lane-Lines/blob/master/lane.py#L120)
 
-I implemented this step in lines # through # in my code in `yet_another_file.py` in the function `map_lane()`.  Here is an example of my result on a test image:
+The offset of the car from the lane center is calculated per detection frame in the [DetectionFrame](https://github.com/ivovandongen/CarND-Advanced-Lane-Lines/blob/master/lane.py#L65) ctor
+as well
 
-![alt text][image6]
+#### 6. Example of detected lane surface back on original image.
+
+The lane overlay is added to the original image in [lane.py](https://github.com/ivovandongen/CarND-Advanced-Lane-Lines/blob/master/lane.py#L14). The needed Transform
+instance is passed so the plotted polygon can be transformed back from birds-eye perspective.
+
+![alt text](output_images/lane_straight_lines1.jpg)
 
 ---
 
 ### Pipeline (video)
-
-#### 1. Provide a link to your final video output.  Your pipeline should perform reasonably well on the entire project video (wobbly lines are ok but no catastrophic failures that would cause the car to drive off the road!).
 
 Here's a [link to my video result](./output_videos/processed_project_video.mp4)
 
@@ -125,6 +142,17 @@ Here's a [link to my video result](./output_videos/processed_project_video.mp4)
 
 ### Discussion
 
-#### 1. Briefly discuss any problems / issues you faced in your implementation of this project.  Where will your pipeline likely fail?  What could you do to make it more robust?
+Using thresholding to clearly mark lane lines proofed very finicky and breaks down quickly under a number of conditions:
+- shadows
+- poorly drawn lane lines
+- poor lighting conditions
+- extranious markings / cracks in the road
 
-Here I'll talk about the approach I took, what techniques I used, what worked and why, where the pipeline might fail and how I might improve it if I were going to pursue this project further.  
+To combat these issues, fine-tuning and combination of many more filters might help. Although the result seems to remain quite
+brittle in the end.
+
+Another issues seems that doing any sort of calculations on the images seems to be subject to a high error rate. Curves and distances are not
+that easy to determine accurately.
+
+Finally, having to calibrate a camera makes this solution difficult to implement with arbitrary end-user hardware. Having a user go through these calibration
+steps might be asking too much. 
