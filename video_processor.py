@@ -88,8 +88,10 @@ class VideoProcessor:
         updated = self.lane.update(warped_image=warped_image)
         if self.debug and updated:
             # output the image for analysis
-            cv2.imwrite('output_videos/invalid_frame_{:.3f}_original.png'.format(t),
-                        org_image)
+            bgr_image = cv2.cvtColor(org_image, cv2.COLOR_RGB2BGR)
+            cv2.imwrite('output_videos/invalid_frame_{:.3f}_original.png'.format(t), bgr_image)
+            polygonned = cv2.polylines(np.copy(bgr_image), [np.int32(self.transform.src)], False, color=255, thickness=1)
+            cv2.imwrite('output_videos/invalid_frame_{:.3f}_framed.png'.format(t), polygonned)
             cv2.imwrite('output_videos/invalid_frame_{:.3f}_warped.png'.format(t),
                         np.dstack((warped_image, warped_image, warped_image)) * 255)
 
@@ -115,8 +117,8 @@ def main():
     processor = VideoProcessor(input_file=input_file, output_file=output_file, image_size=(720, 1280), debug=True)
     print("Processing video", input_file, output_file)
     # processor.process(sub_clip=(38, 42))
-    # processor.process()
-    processor.process(sub_clip=(0, 10))
+    processor.process()
+    # processor.process(sub_clip=(0, 10))
 
 
 if __name__ == '__main__':

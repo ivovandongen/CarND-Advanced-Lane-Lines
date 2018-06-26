@@ -65,18 +65,25 @@ class DetectionFrame:
             self.offset_m = -(self.left_lane.offset_start_m + self.right_lane.offset_start_m)
 
     def is_valid(self):
-        # TODO
-        # - Check if parallel
         return self.left_lane.is_valid() \
                and self.right_lane.is_valid() \
                and self.lane_width_valid() \
-               and self.lane_line_curvatures_valid()
+               and self.lanes_are_parallel()
+               # and self.lane_line_curvatures_valid() \
 
-    def lane_line_curvatures_valid(self):
-        return abs(self.left_lane.curvature_m - self.right_lane.curvature_m) < 100
+    def lane_line_curvatures_valid(self, margin=10):
+        # TODO express in percentage
+        difference = abs(self.left_lane.curvature_m - self.right_lane.curvature_m)
+        percentage = abs(difference / self.left_lane.curvature_m * 100)
+        return percentage < margin
 
-    def lane_width_valid(self):
-        return abs(self.lane_width_start_m - 3.7) < .5
+    def lane_width_valid(self, ideal_lane_width=3.7, margin=.5):
+        return abs(self.lane_width_start_m - ideal_lane_width) < margin
+
+    def lanes_are_parallel(self, max_difference=50):
+        last = len(self.left_lane.fit_x) // 2
+        difference = abs(abs(self.left_lane.fit_x[0] - self.left_lane.fit_x[last]) - abs(self.right_lane.fit_x[0] - self.right_lane.fit_x[last]))
+        return difference < max_difference
 
 
 class Lane:
@@ -105,7 +112,7 @@ class Lane:
         print("Initial detection")
         left_lane, right_lane = find_lines_with_sliding_windows(warped_image)
         frame = DetectionFrame(left_lane, right_lane)
-        if frame.is_valid():
+        if len(self.history) == 0 or frame.is_valid():
             return frame
 
         return None
@@ -126,11 +133,29 @@ class Lane:
         """
         if len(self.history) == 0:
             return None, None
-
-        end_index = min(len(self.history), 3)
-        left_lanes = np.mean([frame.left_lane.fit_x for frame in islice(self.history, end_index)], axis=0)
-        right_lanes = np.mean([frame.right_lane.fit_x for frame in islice(self.history, end_index)], axis=0)
-        return left_lanes, right_lanes
+        elif len(self.history) == 1:
+            return self.history[0].left_lane.fit_x, self.history[0].right_lane.fit_x
+        # else:
+        #     return self.history[0].left_lane.fit_x, self.history[0].right_lane.fit_x
+        else:
+            end_index = min(len(self.history), 5)
+            weights = [100, 10] if end_index == 2 else [100, 10, 1]
+            left_poly = np.average([frame.left_lane.poly for frame in islice(self.history, end_index)], axis=0)
+            right_poly = np.average([frame.right_lane.poly for frame in islice(self.history, end_index)], axis=0,)
+            # weights = [100, 10] if end_index == 2 else [100, 10, 1]
+            # left_poly = np.average([frame.left_lane.poly for frame in islice(self.history, end_index)], axis=0,
+            #                         weights=weights)
+            # right_poly = np.average([frame.right_lane.poly for frame in islice(self.history, end_index)], axis=0,
+            #                         weights=weights)
+            fit_y = self.history[0].left_lane.fit_y
+            return LaneLine.calculate_points_along_line(left_poly, fit_y), LaneLine.calculate_points_along_line(
+                right_poly, fit_y)
+            # end_index = min(len(self.history), 3)
+            # weights = [100, 10] if end_index == 2 else [100, 10, 1]
+            # left_poly = np.average([frame.left_lane.poly for frame in islice(self.history, end_index)], axis=0, weights=weights)
+            # right_poly = np.average([frame.right_lane.poly for frame in islice(self.history, end_index)], axis=0, weights=weights)
+            # fit_y = self.history[0].left_lane.fit_y
+            # return LaneLine.calculate_points_along_line(left_poly, fit_y), LaneLine.calculate_points_along_line(right_poly, fit_y)
 
     def update(self, warped_image):
         """
@@ -141,7 +166,7 @@ class Lane:
         frame = self._detect_frame(warped_image)
 
         if frame is not None:
-            self.history.append(frame)
+            self.history.appendleft(frame)
             self.invalid_counter = 0
             return True
         else:
