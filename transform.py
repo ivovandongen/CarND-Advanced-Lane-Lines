@@ -52,18 +52,18 @@ class PerspectiveTransform(Transform):
     def default(height=720, width=1280):
         print("Calculating perspective transform matrix")
 
-        poly_height = int(height * .35)  # int(height * .35)
+        poly_height = int(height * .35)
         bottom_offset_left = 60
         bottom_offset_right = bottom_offset_left
         bottom_margin = 0
-        top_offset = 120
+        top_offset = 94
         polygon = [[bottom_offset_left, height - bottom_margin],
                    [width // 2 - top_offset, height - poly_height],
                    [width // 2 + top_offset, height - poly_height],
                    [width - bottom_offset_right, height - bottom_margin]]
 
         margin_x_bottom = 200
-        margin_x_top = 100
+        margin_x_top = 200
         dst_height = height #* 3
         dst_width = width
         dst = [[margin_x_bottom, dst_height],
