@@ -90,15 +90,15 @@ def main():
     print("Showing undistorted images")
     for fname in images:
         print("Processing", fname)
-        img = cv2.imread(fname)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img = cv2.cvtColor(cv2.imread(fname), cv2.COLOR_BGR2RGB)
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
         ret, corners = cv2.findChessboardCorners(gray, (9, 6), None)
         checker_board = cv2.drawChessboardCorners(img, (9, 6), corners, ret) if ret else img
         undist = calibration.undistort(img)
 
         f, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(32, 9))
         ax1.set_title('Original', fontsize=20)
-        ax1.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+        ax1.imshow(img)
 
         ax2.set_title('Checkerboard' + ('' if ret else ' could not be applied'), fontsize=20)
         ax2.imshow(checker_board, cmap='gray')
