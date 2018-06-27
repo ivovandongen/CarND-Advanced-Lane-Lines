@@ -55,27 +55,21 @@ class DetectionFrame:
     Represents line detections in a single frame
     """
 
-    def __init__(self, left: LaneLine, right: LaneLine):
+    def __init__(self, image, left: LaneLine, right: LaneLine):
         self.left_lane = left
         self.right_lane = right
         if left.is_valid() and right.is_valid():
             # print(self.left_lane.curvature_m, self.right_lane.curvature_m)
             self.curvature_m = (self.left_lane.curvature_m + self.right_lane.curvature_m) / 2
             self.lane_width_start_m = self.right_lane.offset_start_m - self.left_lane.offset_start_m
-            self.offset_m = -(self.left_lane.offset_start_m + self.right_lane.offset_start_m)
+            # self.offset_m = -(self.left_lane.offset_start_m + self.right_lane.offset_start_m)
+            self.offset_m = ((image.shape[1] / 2) - ((self.left_lane.fit_x[-1] + self.right_lane.fit_x[-1]) / 2)) * self.left_lane.xscale
 
     def is_valid(self):
         return self.left_lane.is_valid() \
                and self.right_lane.is_valid() \
                and self.lane_width_valid() \
                and self.lanes_are_parallel()
-               # and self.lane_line_curvatures_valid() \
-
-    def lane_line_curvatures_valid(self, margin=10):
-        # TODO express in percentage
-        difference = abs(self.left_lane.curvature_m - self.right_lane.curvature_m)
-        percentage = abs(difference / self.left_lane.curvature_m * 100)
-        return percentage < margin
 
     def lane_width_valid(self, ideal_lane_width=3.7, margin=.5):
         return abs(self.lane_width_start_m - ideal_lane_width) < margin
@@ -105,13 +99,13 @@ class Lane:
             left_lane, right_lane = find_lines_from_previous(warped_image,
                                                              previous_frame.left_lane,
                                                              previous_frame.right_lane)
-            frame = DetectionFrame(left_lane, right_lane)
+            frame = DetectionFrame(warped_image, left_lane, right_lane)
             if frame.is_valid():
                 return frame
 
         print("Initial detection")
         left_lane, right_lane = find_lines_with_sliding_windows(warped_image)
-        frame = DetectionFrame(left_lane, right_lane)
+        frame = DetectionFrame(warped_image, left_lane, right_lane)
         if len(self.history) == 0 or frame.is_valid():
             return frame
 
@@ -194,7 +188,7 @@ class Lane:
         if previous_frame is not None:
             radius = self._curve_radius_average()
             entries = list()
-            entries.append(("Radius:", "{: >10.2f}m".format(radius) if radius < 5000 else "    straight"))
+            entries.append(("Radius:", "{: >10.2f}m".format(radius) if radius < 1750 else "    straight"))
             entries.append(("Offset:", "{: >10.2f}m".format(previous_frame.offset_m)))  # todo: average?
             entries.append(("Lane width:", "{: >10.2f}m".format(previous_frame.lane_width_start_m)))  # todo average?
 
