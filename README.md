@@ -136,7 +136,7 @@ instance is passed so the plotted polygon can be transformed back from birds-eye
 
 Here's a [link to my video result](./output_videos/processed_project_video.mp4)
 
-[![IMAGE ALT TEXT HERE](http://img.youtube.com/vi/rhZrqN7tD18/0.jpg)](http://www.youtube.com/watch?v=rhZrqN7tD18)
+[![IMAGE ALT TEXT HERE](http://img.youtube.com/vi/r8472RcEoqU/0.jpg)](http://www.youtube.com/watch?v=r8472RcEoqU)
 
 ---
 
